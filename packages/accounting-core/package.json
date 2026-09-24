@@ -1,0 +1,20 @@
+{
+  "name": "@platform/accounting-core",
+  "private": true,
+  "version": "0.0.1",
+  "description": "The runtime accounting engine — the only code allowed to post to ledger_entries or change stock_movements/current_stock. Milestone 3.",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@platform/db": "0.0.1",
+    "drizzle-orm": "^0.36.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "dotenv": "^16.4.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^20.16.0"
+  }
+}
