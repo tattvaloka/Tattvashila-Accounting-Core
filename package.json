@@ -1,0 +1,14 @@
+{
+  "name": "famous-footwears-platform",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Multi-tenant business management + accounting platform. Milestone 2: database schema and migration only — no application or UI code yet.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "migrate": "npm run migrate --workspace=@platform/db",
+    "seed": "npm run seed --workspace=@platform/db",
+    "test": "npm run test --workspace=@platform/accounting-core"
+  }
+}
