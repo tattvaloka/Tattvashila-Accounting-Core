@@ -1,0 +1,25 @@
+{
+  "name": "@platform/db",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Drizzle schema, SQL migrations, and platform seed data for the accounting platform. Milestone 2 deliverable — schema only, no business logic.",
+  "main": "src/index.ts",
+  "scripts": {
+    "migrate": "node -r dotenv/config -r ts-node/register scripts/run-migrations.ts",
+    "seed": "node -r dotenv/config -r ts-node/register seed/seed.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.28.0",
+    "dotenv": "^16.4.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^20.16.0",
+    "@types/pg": "^8.11.0"
+  }
+}
