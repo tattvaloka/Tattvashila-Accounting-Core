@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { customers, suppliers, productVariants } from '@platform/db';
+import { customers, suppliers, productVariants, products } from '@platform/db';
 import type { Tx } from './accounts';
 import { ACCOUNT_CODES } from './accounts';
 import { AccountingError } from './errors';
 import { postJournal } from './postJournal';
 import { postStockMovement } from './stock';
-import { isZero } from './money';
+import { isZero, toPaise, paiseToAmount } from './money';
 
 /**
  * Posts a customer's opening_balance_input as a real ledger entry:
@@ -62,17 +62,30 @@ export async function postSupplierOpeningBalance(tx: Tx, organizationId: string,
 }
 
 /**
- * Posts a product_variant's starting quantity as a stock_movements row
- * (movement_type = 'opening_balance') rather than a special field —
+ * Posts a product_variant's starting quantity as BOTH a stock_movements row
+ * (movement_type = 'opening_balance') AND the corresponding accounting
+ * entry — Dr Inventory [quantity x product.purchasePrice] / Cr Opening
+ * Balance Equity — atomically (both go through the transaction handle the
+ * caller passes in; call this inside db.transaction(...) the same way as
+ * confirmSale/confirmPurchase). Before Milestone 3's correctness pass this
+ * only wrote the stock movement with no accounting entry at all, which
+ * left the "opening/equity treatment" the design doc promised undelivered.
  * current_stock ends up correct the same way it does for any other
  * movement, because postStockMovement() is the same function every other
- * movement type goes through. Call once, right after creating the variant.
+ * movement type goes through.
  */
 export async function postOpeningStock(tx: Tx, organizationId: string, productVariantId: string, quantity: number, asOfDate: string) {
   if (quantity === 0) return; // nothing to post — current_stock stays at its default of 0
+  if (quantity < 0) {
+    throw new AccountingError('Opening stock quantity cannot be negative.', 'INVALID_QUANTITY');
+  }
 
-  const [variant] = await tx.select().from(productVariants).where(eq(productVariants.id, productVariantId));
-  if (!variant) throw new AccountingError('Product variant not found.', 'NOT_FOUND');
+  const [row] = await tx
+    .select({ purchasePrice: products.purchasePrice })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .where(eq(productVariants.id, productVariantId));
+  if (!row) throw new AccountingError('Product variant not found.', 'NOT_FOUND');
 
   await postStockMovement(tx, {
     organizationId,
@@ -83,4 +96,18 @@ export async function postOpeningStock(tx: Tx, organizationId: string, productVa
     referenceId: productVariantId,
     movementDate: asOfDate,
   });
+
+  const valuePaise = quantity * toPaise(row.purchasePrice);
+  if (valuePaise > 0) {
+    await postJournal(tx, {
+      organizationId,
+      entryDate: asOfDate,
+      referenceType: 'product_variant_onboarding',
+      referenceId: productVariantId,
+      lines: [
+        { accountCode: ACCOUNT_CODES.INVENTORY, debit: paiseToAmount(valuePaise), description: 'Opening stock' },
+        { accountCode: ACCOUNT_CODES.OPENING_BALANCE_EQUITY, credit: paiseToAmount(valuePaise) },
+      ],
+    });
+  }
 }

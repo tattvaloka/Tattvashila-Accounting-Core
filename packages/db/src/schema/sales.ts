@@ -100,6 +100,11 @@ export const saleItems = pgTable(
     rate: numeric('rate', { precision: 14, scale: 2 }).notNull(),
     discountAmount: numeric('discount_amount', { precision: 14, scale: 2 }).notNull().default('0'),
     taxableValue: numeric('taxable_value', { precision: 14, scale: 2 }).notNull(),
+    // Cost of goods sold for this line, frozen at Confirm time from
+    // product.purchasePrice — see migrations/0002_sale_item_cogs.sql for
+    // why this can't just be recomputed later (returns need the figure
+    // that was actually posted, not today's price).
+    cogsAmount: numeric('cogs_amount', { precision: 14, scale: 2 }).notNull().default('0'),
     // Audit pointer only — a documented exception to the composite-FK
     // pattern, because tax_rates can be org-NULL (platform default). The
     // amounts below are the financial truth, computed once at Confirm and

@@ -91,40 +91,21 @@ Org setup → Accounting foundation → ... → Returns → Dashboard → Report
 and building any of them now would jump ahead of what's been reviewed and
 approved so far.
 
-## Milestone 3 — Accounting Core (in progress)
+## Milestone 3 — Accounting Core
 
 `packages/accounting-core` implements the actual runtime posting logic —
 the "AccountingEngine" the earlier design docs described, not just its
-design:
+design. **Full detail — accounting model, what was corrected in the
+Milestone 3 correctness pass, invariants and where each is enforced, and
+exactly which tests were executed vs. only written — lives in
+[`packages/accounting-core/README.md`](packages/accounting-core/README.md),
+not duplicated here.** Summary:
 
-- `postJournal.ts` — the one function allowed to write `ledger_entries`; validates every posting is balanced (debits == credits) before writing anything
-- `stock.ts` — the one function allowed to write `stock_movements` / update `product_variants.current_stock`
-- `tax.ts` — GST rate lookup (org override, falling back to platform default) and line-level CGST/SGST/IGST calculation, with a documented rounding rule
-- `invoiceNumbering.ts` — row-locked, per-financial-year sequence numbers
-- `sales.ts` / `purchases.ts` — `confirmSale`/`confirmPurchase` (Draft → Confirmed, posts stock + ledger atomically) and `createSaleReturn`/`createPurchaseReturn` (partial returns, proportional to the original posted figures, never editing the original transaction)
-- `payments.ts` — customer receipts, supplier payments, and refunds in either direction
-- `openingBalances.ts` — turns `opening_balance_input` / a variant's starting quantity into real ledger/stock entries
-- `expenses.ts` — expense recording against a general expense account
-
-**One documented design decision made while implementing this:**
-`confirmSale`/`confirmPurchase` always post the full amount to Accounts
-Receivable/Payable, regardless of `payment_mode`. A cash sale is then just
-an immediate `recordPayment()` call against that same sale — not a special
-branch inside confirm. This keeps the posting shape identical no matter how
-the customer pays and resolves what `payment_mode = 'split'` would
-otherwise mean ambiguously.
-
-**One known limitation, flagged rather than hidden:** GST inter-state
-determination (CGST+SGST vs IGST) is derived from the customer's/supplier's
-GSTIN prefix when present, falling back to "intra-state" when there's no
-GSTIN — because the schema doesn't carry an explicit state code for
-customers/suppliers. Worth revisiting if unregistered inter-state wholesale
-customers turn out to be common.
-
-### Tests
-
-- `test/money.test.ts`, `test/tax.test.ts`, `test/invoiceNumbering.test.ts`, `test/postJournal.test.ts` — pure unit tests, no database needed. The tax figures were independently hand-verified before being wired into `confirmSale`/`confirmPurchase` (see the worked examples in `test/tax.test.ts`).
-- `test/sales.integration.test.ts` — a real integration test against a live Postgres database: confirms a sale, checks the ledger balances and stock movements, checks the confirmed-immutability trigger actually rejects a direct edit, and checks a partial return. **Did not run in this sandbox** (no network access to a database here) — it self-skips without `DATABASE_URL` set, so `npm test` is safe to run anywhere, but run it for real once you're in an environment with a database.
+- Perpetual inventory: purchases capitalize into `INVENTORY`; sales relieve it and recognize `COGS` in the same posting as revenue, using a frozen `sale_items.cogs_amount` so returns reverse the exact original figure
+- Input GST and Output GST are separate accounts (`INPUT_CGST`/`OUTPUT_CGST` etc.), never netted
+- Stock changes go through a single guarded, concurrency-safe `UPDATE` that cannot produce negative stock
+- Opening stock posts both a `stock_movements` row and a real `Dr Inventory / Cr Opening Balance Equity` entry
+- Quantity validation rejects zero/negative/fractional quantities outright
 
 ### Still not implemented (by design, not oversight)
 

@@ -110,20 +110,33 @@ async function seedPlatform() {
 
 /**
  * Standard chart of accounts, seeded per organization at creation.
+ *
+ * Accounting model: perpetual inventory. A confirmed purchase capitalizes
+ * the goods into INVENTORY (asset) rather than an expense; a confirmed sale
+ * relieves INVENTORY and recognizes COGS at the same time it recognizes
+ * revenue. See the Milestone 3 correctness pass notes in
+ * packages/accounting-core/README.md for the full flow.
+ *
+ * Input GST (paid on purchases, a recoverable credit) and Output GST
+ * (collected on sales, owed to the government) are kept in separate
+ * accounts — they are never netted against each other by this code.
  * "Opening Balance Equity" exists purely to balance opening-balance
- * postings for customers/suppliers/stock — see the design doc.
+ * postings for customers/suppliers/stock.
  */
 const DEFAULT_LEDGER_ACCOUNTS = [
   { code: 'CASH', name: 'Cash', accountType: 'asset' as const },
   { code: 'BANK', name: 'Bank', accountType: 'asset' as const },
   { code: 'AR', name: 'Accounts Receivable', accountType: 'asset' as const },
   { code: 'INVENTORY', name: 'Inventory', accountType: 'asset' as const },
+  { code: 'INPUT_CGST', name: 'Input CGST Credit', accountType: 'asset' as const },
+  { code: 'INPUT_SGST', name: 'Input SGST Credit', accountType: 'asset' as const },
+  { code: 'INPUT_IGST', name: 'Input IGST Credit', accountType: 'asset' as const },
   { code: 'AP', name: 'Accounts Payable', accountType: 'liability' as const },
-  { code: 'CGST_PAYABLE', name: 'CGST Payable', accountType: 'liability' as const },
-  { code: 'SGST_PAYABLE', name: 'SGST Payable', accountType: 'liability' as const },
-  { code: 'IGST_PAYABLE', name: 'IGST Payable', accountType: 'liability' as const },
+  { code: 'OUTPUT_CGST', name: 'Output CGST Payable', accountType: 'liability' as const },
+  { code: 'OUTPUT_SGST', name: 'Output SGST Payable', accountType: 'liability' as const },
+  { code: 'OUTPUT_IGST', name: 'Output IGST Payable', accountType: 'liability' as const },
   { code: 'SALES', name: 'Sales', accountType: 'income' as const },
-  { code: 'PURCHASES', name: 'Purchases', accountType: 'expense' as const },
+  { code: 'COGS', name: 'Cost of Goods Sold', accountType: 'expense' as const },
   { code: 'EXPENSES', name: 'General Expenses', accountType: 'expense' as const },
   { code: 'OPENING_BALANCE_EQUITY', name: 'Opening Balance Equity', accountType: 'equity' as const },
 ];

@@ -65,10 +65,11 @@ export async function confirmSale(tx: Tx, input: ConfirmSaleInput): Promise<Conf
   let cgstPaise = 0;
   let sgstPaise = 0;
   let igstPaise = 0;
+  let cogsPaise = 0;
 
   for (const item of items) {
     const [variantRow] = await tx
-      .select({ hsnCode: products.hsnCode })
+      .select({ hsnCode: products.hsnCode, purchasePrice: products.purchasePrice })
       .from(productVariants)
       .innerJoin(products, eq(products.id, productVariants.productId))
       .where(eq(productVariants.id, item.productVariantId));
@@ -88,6 +89,14 @@ export async function confirmSale(tx: Tx, input: ConfirmSaleInput): Promise<Conf
       isInterState,
     });
 
+    // Perpetual inventory: COGS for this line is quantity x the product's
+    // *current* purchase_price (a standard-cost simplification — not
+    // FIFO/weighted-average lot costing, which would need per-lot cost
+    // tracking the schema doesn't have). Frozen onto the line now so a
+    // later return reverses this exact figure, not whatever the product's
+    // price happens to be at return time.
+    const lineCogsPaise = item.quantity * toPaise(variantRow.purchasePrice);
+
     await tx
       .update(saleItems)
       .set({
@@ -97,6 +106,7 @@ export async function confirmSale(tx: Tx, input: ConfirmSaleInput): Promise<Conf
         sgstAmount: calc.sgstAmount,
         igstAmount: calc.igstAmount,
         lineTotal: calc.lineTotal,
+        cogsAmount: paiseToAmount(lineCogsPaise),
       })
       .where(eq(saleItems.id, item.id));
 
@@ -106,7 +116,12 @@ export async function confirmSale(tx: Tx, input: ConfirmSaleInput): Promise<Conf
     cgstPaise += toPaise(calc.cgstAmount);
     sgstPaise += toPaise(calc.sgstAmount);
     igstPaise += toPaise(calc.igstAmount);
+    cogsPaise += lineCogsPaise;
 
+    // Guarded/atomic against negative stock and concurrent sales — see
+    // stock.ts. Throws INSUFFICIENT_STOCK if this line can't be fulfilled,
+    // which aborts this whole function and rolls back everything posted so
+    // far in the same transaction (no partial stock/ledger mutation).
     await postStockMovement(tx, {
       organizationId: input.organizationId,
       productVariantId: item.productVariantId,
@@ -122,6 +137,11 @@ export async function confirmSale(tx: Tx, input: ConfirmSaleInput): Promise<Conf
   const financialYear = financialYearFor(sale.saleDate, org.financialYearStartMonth);
   const invoiceNumber = await nextInvoiceNumber(tx, input.organizationId, 'sale', financialYear, org.invoicePrefix);
 
+  // One balanced posting covering both sides of the transaction: revenue
+  // recognition (Dr AR / Cr Sales / Cr Output GST) and inventory relief
+  // (Dr COGS / Cr Inventory) together, dated and referenced identically so
+  // they can never be confirmed as two separate, potentially-inconsistent
+  // postings.
   await postJournal(tx, {
     organizationId: input.organizationId,
     entryDate: sale.saleDate,
@@ -135,9 +155,15 @@ export async function confirmSale(tx: Tx, input: ConfirmSaleInput): Promise<Conf
         description: `Sale ${invoiceNumber}`,
       },
       { accountCode: ACCOUNT_CODES.SALES, credit: paiseToAmount(taxablePaise), description: `Sale ${invoiceNumber}` },
-      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.CGST_PAYABLE, credit: paiseToAmount(cgstPaise) }] : []),
-      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.SGST_PAYABLE, credit: paiseToAmount(sgstPaise) }] : []),
-      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.IGST_PAYABLE, credit: paiseToAmount(igstPaise) }] : []),
+      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.OUTPUT_CGST, credit: paiseToAmount(cgstPaise) }] : []),
+      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.OUTPUT_SGST, credit: paiseToAmount(sgstPaise) }] : []),
+      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.OUTPUT_IGST, credit: paiseToAmount(igstPaise) }] : []),
+      ...(cogsPaise > 0
+        ? [
+            { accountCode: ACCOUNT_CODES.COGS, debit: paiseToAmount(cogsPaise), description: `COGS for ${invoiceNumber}` },
+            { accountCode: ACCOUNT_CODES.INVENTORY, credit: paiseToAmount(cogsPaise) },
+          ]
+        : []),
     ],
   });
 
@@ -200,6 +226,7 @@ export async function createSaleReturn(tx: Tx, input: CreateSaleReturnInput) {
   let sgstPaise = 0;
   let igstPaise = 0;
   let totalPaise = 0;
+  let cogsPaise = 0;
   const stockUpdates: Array<{ productVariantId: string; quantity: number }> = [];
   const returnItemRows: Array<{ saleItemId: string; quantity: number; amount: string }> = [];
 
@@ -227,12 +254,13 @@ export async function createSaleReturn(tx: Tx, input: CreateSaleReturnInput) {
     }
 
     // Proportional to the original line's already-computed, posted figures
-    // — never recomputed from a (possibly since-changed) tax rate.
+    // — never recomputed from a (possibly since-changed) tax rate or price.
     const fraction = line.quantity / item.quantity;
     const lineTaxable = Math.round(toPaise(item.taxableValue) * fraction);
     const lineCgst = Math.round(toPaise(item.cgstAmount) * fraction);
     const lineSgst = Math.round(toPaise(item.sgstAmount) * fraction);
     const lineIgst = Math.round(toPaise(item.igstAmount) * fraction);
+    const lineCogs = Math.round(toPaise(item.cogsAmount) * fraction);
     const lineTotal = lineTaxable + lineCgst + lineSgst + lineIgst;
 
     taxablePaise += lineTaxable;
@@ -240,6 +268,7 @@ export async function createSaleReturn(tx: Tx, input: CreateSaleReturnInput) {
     sgstPaise += lineSgst;
     igstPaise += lineIgst;
     totalPaise += lineTotal;
+    cogsPaise += lineCogs;
 
     stockUpdates.push({ productVariantId: item.productVariantId, quantity: line.quantity });
     returnItemRows.push({ saleItemId: item.id, quantity: line.quantity, amount: paiseToAmount(lineTotal) });
@@ -292,15 +321,24 @@ export async function createSaleReturn(tx: Tx, input: CreateSaleReturnInput) {
     referenceId: saleReturn.id,
     lines: [
       { accountCode: ACCOUNT_CODES.SALES, debit: paiseToAmount(taxablePaise), description: `Return ${returnNumber}` },
-      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.CGST_PAYABLE, debit: paiseToAmount(cgstPaise) }] : []),
-      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.SGST_PAYABLE, debit: paiseToAmount(sgstPaise) }] : []),
-      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.IGST_PAYABLE, debit: paiseToAmount(igstPaise) }] : []),
+      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.OUTPUT_CGST, debit: paiseToAmount(cgstPaise) }] : []),
+      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.OUTPUT_SGST, debit: paiseToAmount(sgstPaise) }] : []),
+      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.OUTPUT_IGST, debit: paiseToAmount(igstPaise) }] : []),
       {
         accountCode: ACCOUNT_CODES.ACCOUNTS_RECEIVABLE,
         credit: paiseToAmount(totalPaise),
         customerId: sale.customerId,
         description: `Return ${returnNumber}`,
       },
+      // COGS reversal: the goods are back on the shelf, so their cost comes
+      // back out of COGS and back into Inventory — using the exact figure
+      // frozen on the line at Confirm time, not today's purchase_price.
+      ...(cogsPaise > 0
+        ? [
+            { accountCode: ACCOUNT_CODES.INVENTORY, debit: paiseToAmount(cogsPaise), description: `Return ${returnNumber}` },
+            { accountCode: ACCOUNT_CODES.COGS, credit: paiseToAmount(cogsPaise) },
+          ]
+        : []),
     ],
   });
 

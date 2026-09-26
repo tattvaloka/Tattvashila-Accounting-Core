@@ -14,7 +14,7 @@ const cacheKey = (organizationId: string, code: string) => `${organizationId}:${
 
 /**
  * Resolves a ledger account by its short code (e.g. 'AR', 'SALES',
- * 'CGST_PAYABLE') within the given organization. Every posting function in
+ * 'OUTPUT_CGST') within the given organization. Every posting function in
  * this package goes through here rather than hard-coding account ids, so
  * the seeded chart of accounts (see packages/db/seed/seed.ts) is the single
  * place account codes are defined.
@@ -42,18 +42,26 @@ export async function getAccountId(tx: Tx, organizationId: string, code: string)
 }
 
 /** Standard account codes used throughout this package. Keep in sync with
- * DEFAULT_LEDGER_ACCOUNTS in packages/db/seed/seed.ts. */
+ * DEFAULT_LEDGER_ACCOUNTS in packages/db/seed/seed.ts.
+ *
+ * Perpetual inventory model: purchases capitalize into INVENTORY; sales
+ * relieve INVENTORY and recognize COGS in the same posting as revenue.
+ * Input GST (an asset — a recoverable credit) and Output GST (a liability)
+ * are kept in separate accounts and never netted by this code. */
 export const ACCOUNT_CODES = {
   CASH: 'CASH',
   BANK: 'BANK',
   ACCOUNTS_RECEIVABLE: 'AR',
   INVENTORY: 'INVENTORY',
+  INPUT_CGST: 'INPUT_CGST',
+  INPUT_SGST: 'INPUT_SGST',
+  INPUT_IGST: 'INPUT_IGST',
   ACCOUNTS_PAYABLE: 'AP',
-  CGST_PAYABLE: 'CGST_PAYABLE',
-  SGST_PAYABLE: 'SGST_PAYABLE',
-  IGST_PAYABLE: 'IGST_PAYABLE',
+  OUTPUT_CGST: 'OUTPUT_CGST',
+  OUTPUT_SGST: 'OUTPUT_SGST',
+  OUTPUT_IGST: 'OUTPUT_IGST',
   SALES: 'SALES',
-  PURCHASES: 'PURCHASES',
+  COGS: 'COGS',
   EXPENSES: 'EXPENSES',
   OPENING_BALANCE_EQUITY: 'OPENING_BALANCE_EQUITY',
 } as const;

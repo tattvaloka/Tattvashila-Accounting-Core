@@ -124,10 +124,13 @@ export async function confirmPurchase(tx: Tx, input: ConfirmPurchaseInput): Prom
     referenceType: 'purchase',
     referenceId: purchase.id,
     lines: [
-      { accountCode: ACCOUNT_CODES.PURCHASES, debit: paiseToAmount(taxablePaise), description: `Purchase ${invoiceNumber}` },
-      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.CGST_PAYABLE, debit: paiseToAmount(cgstPaise) }] : []),
-      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.SGST_PAYABLE, debit: paiseToAmount(sgstPaise) }] : []),
-      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.IGST_PAYABLE, debit: paiseToAmount(igstPaise) }] : []),
+      // Perpetual inventory: the purchase capitalizes into Inventory (an
+      // asset), not an expense. It becomes COGS later, at the moment the
+      // stock is actually sold (see sales.ts confirmSale).
+      { accountCode: ACCOUNT_CODES.INVENTORY, debit: paiseToAmount(taxablePaise), description: `Purchase ${invoiceNumber}` },
+      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.INPUT_CGST, debit: paiseToAmount(cgstPaise) }] : []),
+      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.INPUT_SGST, debit: paiseToAmount(sgstPaise) }] : []),
+      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.INPUT_IGST, debit: paiseToAmount(igstPaise) }] : []),
       {
         accountCode: ACCOUNT_CODES.ACCOUNTS_PAYABLE,
         credit: paiseToAmount(grandTotalPaise),
@@ -286,10 +289,13 @@ export async function createPurchaseReturn(tx: Tx, input: CreatePurchaseReturnIn
         supplierId: purchase.supplierId,
         description: `Return ${returnNumber}`,
       },
-      { accountCode: ACCOUNT_CODES.PURCHASES, credit: paiseToAmount(taxablePaise), description: `Return ${returnNumber}` },
-      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.CGST_PAYABLE, credit: paiseToAmount(cgstPaise) }] : []),
-      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.SGST_PAYABLE, credit: paiseToAmount(sgstPaise) }] : []),
-      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.IGST_PAYABLE, credit: paiseToAmount(igstPaise) }] : []),
+      // Mirrors confirmPurchase: relieves Inventory, not a "Purchases"
+      // expense account — the goods are physically leaving, so their
+      // capitalized cost leaves with them.
+      { accountCode: ACCOUNT_CODES.INVENTORY, credit: paiseToAmount(taxablePaise), description: `Return ${returnNumber}` },
+      ...(cgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.INPUT_CGST, credit: paiseToAmount(cgstPaise) }] : []),
+      ...(sgstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.INPUT_SGST, credit: paiseToAmount(sgstPaise) }] : []),
+      ...(igstPaise > 0 ? [{ accountCode: ACCOUNT_CODES.INPUT_IGST, credit: paiseToAmount(igstPaise) }] : []),
     ],
   });
 

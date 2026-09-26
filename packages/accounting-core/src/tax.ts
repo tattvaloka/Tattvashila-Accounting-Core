@@ -77,9 +77,22 @@ export interface LineTaxResult {
  * so no floating-point drift enters the figure that gets posted to the
  * ledger. See test/tax.test.ts for the worked examples this was checked
  * against before being wired into confirmSale/confirmPurchase.
+ *
+ * Quantity validation (Milestone 3 correctness pass, Item 5): footwear is
+ * sold in whole pairs. A fractional or non-positive quantity is a caller
+ * bug, not something to silently coerce — this used to call Math.round() on
+ * the quantity, which would have quietly turned e.g. 2.5 into 3 and posted
+ * tax on a quantity that was never actually sold. Rejected outright now.
  */
 export function calculateLineTax(input: LineTaxInput): LineTaxResult {
-  const grossPaise = Math.round(input.quantity) * toPaise(input.rate);
+  if (!Number.isInteger(input.quantity) || input.quantity <= 0) {
+    throw new AccountingError(
+      `Quantity must be a positive whole number of pairs; got ${input.quantity}.`,
+      'INVALID_QUANTITY',
+    );
+  }
+
+  const grossPaise = input.quantity * toPaise(input.rate);
   const discountPaise = toPaise(input.discountAmount);
   const taxablePaise = grossPaise - discountPaise;
 

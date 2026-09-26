@@ -64,4 +64,32 @@ describe('calculateLineTax', () => {
     expect(r.taxableValue).toBe('0.00');
     expect(r.lineTotal).toBe('0.00');
   });
+
+  // Milestone 3 correctness pass, Item 5: quantity must be a whole number
+  // of pairs. This used to silently Math.round() a fractional quantity —
+  // now it's a rejected input, not a rounding decision made on the
+  // caller's behalf.
+  it('rejects a zero quantity', () => {
+    expect(() => calculateLineTax({ quantity: 0, rate: '500.00', discountAmount: '0.00', taxRate: rate18, isInterState: false })).toThrow(
+      /positive whole number/i,
+    );
+  });
+
+  it('rejects a negative quantity', () => {
+    expect(() =>
+      calculateLineTax({ quantity: -3, rate: '500.00', discountAmount: '0.00', taxRate: rate18, isInterState: false }),
+    ).toThrow(/positive whole number/i);
+  });
+
+  it('rejects a fractional quantity instead of rounding it', () => {
+    expect(() =>
+      calculateLineTax({ quantity: 2.5, rate: '500.00', discountAmount: '0.00', taxRate: rate18, isInterState: false }),
+    ).toThrow(/positive whole number/i);
+  });
+
+  it('accepts whole-number quantities, including 1', () => {
+    expect(() =>
+      calculateLineTax({ quantity: 1, rate: '500.00', discountAmount: '0.00', taxRate: rate18, isInterState: false }),
+    ).not.toThrow();
+  });
 });
