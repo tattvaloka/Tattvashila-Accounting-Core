@@ -55,6 +55,7 @@ export const sales = pgTable(
   },
   (t) => [
     // Supports the payments -> sales composite FK (see payments.ts)
+    unique('sales_org_id_uidx').on(t.organizationId, t.id),
     unique('sales_org_id_customer_uidx').on(t.organizationId, t.id, t.customerId),
     unique('sales_org_invoice_uidx').on(t.organizationId, t.invoiceNumber),
     index('sales_org_customer_idx').on(t.organizationId, t.customerId),
